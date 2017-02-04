@@ -1836,6 +1836,39 @@ static bool CanThrow(Expr *E, ASTContext &Ctx) {
 }
 
 CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
+  if (Context->getLangOpts().CheckedC &&
+    C->getBuiltinCallee() == Builtin::BI_Dynamic_check) {
+
+    // This code is very much stolen from how Clang generates a CFG
+    // for If-statements.
+
+    // If the dynamic check fails, the function won't return.
+    CFGBlock *SuccessBlock = Succ;
+    CFGBlock *FailBlock = createNoReturnBlock();
+
+    // Now create a new block containing the _Dynamic_check call
+    Block = createBlock(false);
+
+    // Set the terminator of the new block to the _Dynamic_check call
+    Block->setTerminator(C);
+
+    // See if the condition is a known constant.
+    const TryResult &KnownVal = tryEvaluateBool(C->getArg(0));
+
+    // Add the successors.  If we know that specific branches are
+    // unreachable, inform addSuccessor() of that knowledge.
+    addSuccessor(Block, SuccessBlock, /* isReachable = */ !KnownVal.isFalse());
+    addSuccessor(Block, FailBlock, /* isReachable = */ !KnownVal.isTrue());
+
+    // Add the condition as the last statement in the new block.  This may create
+    // new blocks as the condition may contain control-flow.  Any newly created
+    // blocks will be pointed to be "Block".
+    CFGBlock *LastBlock = addStmt(C->getArg(0));
+
+    return LastBlock;
+  }
+
+
   // Compute the callee type.
   QualType calleeType = C->getCallee()->getType();
   if (calleeType == Context->BoundMemberTy) {
