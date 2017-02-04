@@ -1839,12 +1839,26 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
   if (Context->getLangOpts().CheckedC &&
     C->getBuiltinCallee() == Builtin::BI_Dynamic_check) {
 
+    Expr *Condition = C->getArg(0);
+
     // This code is very much stolen from how Clang generates a CFG
     // for If-statements.
+
+    // We're finished with the previous block.
+    if (Block) {
+      Succ = Block;
+      if (badCFG)
+        return nullptr;
+    }
 
     // If the dynamic check fails, the function won't return.
     CFGBlock *SuccessBlock = Succ;
     CFGBlock *FailBlock = createNoReturnBlock();
+
+    if (BinaryOperator *Cond =
+      dyn_cast<BinaryOperator>(Condition->IgnoreParens()))
+      if (Cond->isLogicalOp())
+        return VisitLogicalOperator(Cond, C, SuccessBlock, FailBlock).first;
 
     // Now create a new block containing the _Dynamic_check call
     Block = createBlock(false);
@@ -1853,7 +1867,7 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
     Block->setTerminator(C);
 
     // See if the condition is a known constant.
-    const TryResult &KnownVal = tryEvaluateBool(C->getArg(0));
+    const TryResult &KnownVal = tryEvaluateBool(Condition);
 
     // Add the successors.  If we know that specific branches are
     // unreachable, inform addSuccessor() of that knowledge.
@@ -1863,9 +1877,7 @@ CFGBlock *CFGBuilder::VisitCallExpr(CallExpr *C, AddStmtChoice asc) {
     // Add the condition as the last statement in the new block.  This may create
     // new blocks as the condition may contain control-flow.  Any newly created
     // blocks will be pointed to be "Block".
-    CFGBlock *LastBlock = addStmt(C->getArg(0));
-
-    return LastBlock;
+    return addStmt(Condition);
   }
 
 
