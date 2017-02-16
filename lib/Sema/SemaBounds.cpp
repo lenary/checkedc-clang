@@ -693,6 +693,8 @@ namespace {
             S.Diag(E->getLocStart(), diag::err_expected_bounds);
           return Bounds;
       }
+
+      return nullptr;
     }
 
   public:
