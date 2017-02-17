@@ -8096,8 +8096,35 @@ QualType Sema::ResolveSingleAssignmentType(QualType LHSType,
     TrialConvTy = 
       CheckSingleAssignmentConstraints(LHSInteropType, RHS,
                                        false, false, false);
-    if (TrialConvTy != Sema::AssignConvertType::Incompatible)
-      Result = LHSInteropType;
+    if (TrialConvTy == Sema::AssignConvertType::IncompatibleNestedPointerQualifiers) {
+      // The qualifiers of the interop type don't agree with the RHS, but we already know the LHS is incompatible
+      // so let's just leave it as the LHSType
+      return LHSInteropType;
+    }
+    else if (TrialConvTy != Sema::AssignConvertType::Incompatible) {
+      // LHSInteropType is compatible enough with LHSType that we can proceed
+      // But in most cases we'll need to insert a bitcast.
+
+      Expr *RHSInner = RHS.get();
+      Expr *RHSAsRValue = RHSInner;
+
+      if (RHSInner->isLValue()) {
+        // We need to insert an LValueToRValue cast inside the bitcast. It would be easier if we had the bitcast
+        // when we got to this code, but of course we don't
+
+        // You can't do an LValueToRValue cast on an array, but Clang will do an ArrayToPointer cast, which
+        // I believe does the right thing, so bail out now.
+        if (RHSInner->getType()->isArrayType())
+          return LHSInteropType;
+
+        RHSAsRValue = ImplicitCastExpr::Create(Context, RHSInner->getType(), CK_LValueToRValue, RHSInner, nullptr, VK_RValue);
+      }
+
+      // This is where we wrap the RValue we now have in a bitcast, which should work.
+      // and, if we're right, the qualifiers still match.
+      Expr *BitCast = ImplicitCastExpr::Create(Context, LHSType, CK_BitCast, RHSAsRValue, nullptr, VK_RValue);
+      RHS.set(BitCast);
+    }
   }
   return Result;
 }
